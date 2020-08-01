@@ -34,20 +34,17 @@ import skimage.morphology as sk_morphology
 import skimage.segmentation as sk_segmentation
 import colorsys
 from enum import Enum
-from keras.models import Model, load_model
-from keras.applications.resnet50 import ResNet50
-# from keras.applications.vgg19 import VGG19
-# from keras.applications.inception_v3 import InceptionV3
-# from keras.applications.xception import Xception
-# from keras.applications.inception_resnet_v2 import InceptionResNetV2
-# from keras.applications import NASNetLarge
+import torch
+from torch import nn
+from torch.nn import functional as F
+from torchvision import transforms, utils, models
 
 ## 画像処理設定項目：
 # FILTER処理を行う画像の縮小倍率 (例 2 → 縦1/2, 横 1/2で書き出し)
 SCALE_FACTOR = 32
 # 分割する際の1枚あたりのタイルサイズ
-ROW_TILE_SIZE = 1024
-COL_TILE_SIZE = 1024
+ROW_TILE_SIZE = 2048
+COL_TILE_SIZE = 2048
 # タイル分割時の組織量に基づく表示閾値
 TISSUE_HIGH_THRESH = 50
 TISSUE_LOW_THRESH = 10
@@ -58,12 +55,10 @@ EXPORT_TILE_SCALE = 4
 DISPLAY_TILE_SUMMARY_LABELS = True
 # HE image normalization parameters
 normalize_Io = 240
-normalize_alpha = 1
+normalize_alpha = 0.1
 normalize_beta = 0.15
-# Label names
-classes = ["IR", "MT", "PG", "SP", "ST"]
 # Name of trained model
-MODEL_NAME = "0704_model_ResNet50"
+MODEL_NAME = "0722_TLS_weights"
 
 ## 入出力ファイル設定項目:
 # BASE DIRECTORYを記入
@@ -71,7 +66,7 @@ BASE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 # Whole Slide Image 入力ファイルフォルダ名をSRC_TRAIN_DIRで規定
 SRC_TRAIN_DIR = os.path.join(BASE_DIR, "original")
 # Whole Slide Image 入力ファイル名は TRAIN_PREFIX + 3桁の番号 で規定
-TRAIN_PREFIX = "IMR_"
+TRAIN_PREFIX = "UCEC_"
 # Whole Slide Image 入力ファイル拡張子を SRC_TRAIN_EXT で規定 (svs, ndpi 等)
 SRC_TRAIN_EXT = "svs"
 # 出力TILEファイル拡張子を DEST_TILE_EXT で規定 (png, jpg, tif 等)
@@ -82,7 +77,7 @@ SAVE_TRAININGIMAGE = True
 SAVE_FILTERDIMAGE = True
 SAVE_SUMMARY = True
 SAVE_DATA = True
-SAVE_TILES = False
+SAVE_TILES = True
 HTML_EXPORT = True
 ANNOTATE_TILE = True
 
@@ -113,9 +108,9 @@ TILE_ANNOTATION_SUMMARY_PAGINATION_SIZE = 50
 TILE_ANNOTATION_SUMMARY_PAGINATE = True
 TILE_ANNOTATION_SUMMARY_HTML_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TILE_ANNOTATION_DIR = os.path.join(BASE_DIR, "tile_annotation")
-TILE_ANNOTATION_SUFFIX = "tile_annotation"
+TILE_ANNOTATION_SUFFIX = TRAIN_PREFIX + "tile_annotation"
 
-MODEL_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) + "/model/"
+MODEL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/model/"
 
 ## Exportファイルの色設定
 HIGH_COLOR = (0, 255, 0)
@@ -1029,7 +1024,7 @@ def tile_border_color(tissue_percentage):
   return border_color
 
 
-def generate_tile_annotation_summaries(tile_sum, np_orig, filterd_np_img, display=False, save_summary=SAVE_SUMMARY):
+def generate_tile_annotation_summaries(tile_sum, np_orig, display=False, save_summary=SAVE_SUMMARY):
   """
   Generate summary images/thumbnails showing a 'heatmap' representation of the tissue segmentation of all tiles.
   Args:
@@ -1038,74 +1033,25 @@ def generate_tile_annotation_summaries(tile_sum, np_orig, filterd_np_img, displa
     display: If True, display tile summary to screen.
     save_summary: If True, save tile summary images.
   """
-  z = 350  # height of area at top of summary slide
-  slide_num = tile_sum.slide_num
-  rows = tile_sum.scaled_h
-  cols = tile_sum.scaled_w
-  row_tile_size = tile_sum.scaled_tile_h
-  col_tile_size = tile_sum.scaled_tile_w
-  num_row_tiles, num_col_tiles = get_num_tiles(rows, cols, row_tile_size, col_tile_size)
-  summary = create_summary_pil_img(filterd_np_img, z, row_tile_size, col_tile_size, num_row_tiles, num_col_tiles)
-  draw = ImageDraw.Draw(summary)
-
-  summary_orig = create_summary_pil_img(np_orig, z, row_tile_size, col_tile_size, num_row_tiles, num_col_tiles)
-  draw_orig = ImageDraw.Draw(summary_orig)
+  
+  draw = ImageDraw.Draw(np_orig)
 
   for t in tile_sum.tiles:
-    border_color = tile_annotation_border_color(t.tissue_label)
-    tile_border(draw, t.r_s + z, t.r_e + z, t.c_s, t.c_e, border_color)
-    tile_border(draw_orig, t.r_s + z, t.r_e + z, t.c_s, t.c_e, border_color)
+    tile_col = math.floor((t.o_r_e - t.o_r_s) / EXPORT_TILE_SCALE)
+    tile_row = math.floor((t.o_c_e - t.o_c_s) / EXPORT_TILE_SCALE)
+    pil_pred_tile = t.pil_pred_tile
+    if pil_pred_tile == None:
+      pil_pred_tile = np.zeros((tile_col, tile_row, 3))
 
-  summary_txt = summary_title(tile_sum) + "\n" + summary_annotation_stats(tile_sum)
-
-  summary_font = ImageFont.truetype(SUMMARY_TITLE_FONT_PATH, size=SUMMARY_TITLE_TEXT_SIZE)
-  draw.text((5, 5), summary_txt, SUMMARY_TITLE_TEXT_COLOR, font=summary_font)
-  draw_orig.text((5, 5), summary_txt, SUMMARY_TITLE_TEXT_COLOR, font=summary_font)
-
-  if DISPLAY_TILE_SUMMARY_LABELS:
-    count = 0
-    for t in tile_sum.tiles:
-      count += 1
-      label = "%s" % (t.tissue_label)
-      font = ImageFont.truetype(FONT_PATH, size=TILE_LABEL_TEXT_SIZE)
-      # drop shadow behind text
-      draw.text(((t.c_s + 3), (t.r_s + 3 + z)), label, (0, 0, 0), font=font)
-      draw_orig.text(((t.c_s + 3), (t.r_s + 3 + z)), label, (0, 0, 0), font=font)
-
-      draw.text(((t.c_s + 2), (t.r_s + 2 + z)), label, ANNOTATION_SUMMARY_TILE_TEXT_COLOR, font=font)
-      draw_orig.text(((t.c_s + 2), (t.r_s + 2 + z)), label,ANNOTATION_SUMMARY_TILE_TEXT_COLOR_ORI, font=font)
+  この部分について画像を結合
+  summary = Image.blens(np_orig, 結合画像, 0.3)
 
   if display:
     summary.show()
-    summary_orig.show()
 
   if save_summary:
     dimension = tile_sum.orig_w, tile_sum.orig_h, tile_sum.scaled_w, tile_sum.scaled_h
     save_tile_summary_annotation_image(summary, slide_num, dimension)
-    save_tile_summary_annotation_on_original_image(summary_orig, slide_num, dimension)
-
-
-def tile_annotation_border_color(tissue_label):
-  """
-  Obtain the corresponding tile border color for a particular tile tissue label.
-  Args:
-    tissue_label: The tile tissue label
-  Returns:
-    The tile border color corresponding to the tile tissue label.
-  """
-  if tissue_label == "IR":
-    border_color = IR_COLOR
-  elif tissue_label == "MT":
-    border_color = MT_COLOR
-  elif tissue_label == "PG":
-    border_color = PG_COLOR
-  elif tissue_label == "SP":
-    border_color = SP_COLOR
-  elif tissue_label == "ST":
-    border_color = ST_COLOR
-  else:
-    border_color = ND_COLOR
-  return border_color
 
 
 def tile_border(draw, r_s, r_e, c_s, c_e, color, border_size=TILE_BORDER_SIZE):
@@ -1237,36 +1183,6 @@ def summary_stats(tile_summary):
          "> %5d (%5.2f%%) tiles exported" % (tile_summary.export, tile_summary.export / tile_summary.count * 100)
 
 
-def summary_annotation_stats(tile_summary):
-  """
-  Obtain various stats about the slide tiles.
-  Args:
-    tile_summary: TileSummary object.
-  Returns:
-     Various stats about the slide tiles as a string.
-  """
-  return "Original Dimensions: %dx%d\n" % (tile_summary.orig_w, tile_summary.orig_h) + \
-         "Original Tile Size: %dx%d\n" % (tile_summary.orig_tile_w, tile_summary.orig_tile_h) + \
-         "Total Mask: %3.2f%% / Total Tissue: %3.2f%%\n" % (
-           tile_summary.mask_percentage(), tile_summary.tissue_percentage) + \
-         "Export setting: threshold %d%%  compressed to %dx%d px (1/%dx)\n" % (EXPORT_TILE_THRESH, ROW_TILE_SIZE/EXPORT_TILE_SCALE,
-                                                                          COL_TILE_SIZE/EXPORT_TILE_SCALE, EXPORT_TILE_SCALE) + \
-         "> %5d (%5.2f%%) tiles exported and labeled\n" % (tile_summary.export, tile_summary.export / tile_summary.count * 100) + \
-         "  Tumor = %5d tiles (%5.2f%%/labeled)\n" % (
-           tile_summary.tumor, tile_summary.tumor/tile_summary.export * 100) + \
-         "   - Label: IR = %5d (%5.2f%%) tiles\n" % (
-           tile_summary.IR, tile_summary.IR / tile_summary.tumor * 100) + \
-         "   - Label: MT = %5d (%5.2f%%) tiles\n" % (
-           tile_summary.MT, tile_summary.MT / tile_summary.tumor * 100) + \
-         "   - Label: PG = %5d (%5.2f%%) tiles\n" % (
-           tile_summary.PG, tile_summary.PG / tile_summary.tumor * 100) + \
-         "   - Label: SP = %5d (%5.2f%%) tiles\n" % (
-           tile_summary.SP, tile_summary.SP / tile_summary.tumor * 100) + \
-         "  Stroma = %5d tiles (%5.2f%%/labeled)\n" % (
-           tile_summary.ST, tile_summary.ST / tile_summary.export * 100) + \
-         "Estimated Tissue Subtype: %s" % (tile_summary.diagnosis)
-
-
 def save_annotation_data(tile_summary, dimension):
   """
   Save tile data to csv file.
@@ -1275,14 +1191,14 @@ def save_annotation_data(tile_summary, dimension):
   """
 
   time = Time()
-  csv = summary_title(tile_summary) + "\n" + summary_annotation_stats(tile_summary) + "\n"
+  csv = summary_title(tile_summary) + "\n"
 
   csv += "Tile_Num,Row,Column,Tissue_%,Col_Start,Row_Start,Col_End,Row_End," + \
          "Original_Col_Start,Original_Row_Start,Original_Col_End,Original_Row_End,Score,Tile_Path,Tissue_Label,Probability\n"
 
   for t in tile_summary.tiles:
-    line = "%d,%d,%d,%4.2f,%d,%d,%d,%d,%d,%d,%d,%d,%0.4f,%s,%s,%s\n" % (
-      t.tile_num, t.r, t.c, t.tissue_percentage, t.c_s, t.r_s, t.c_e, t.r_e, t.o_c_s, t.o_r_s, t.o_c_e, t.o_r_e, t.score, t.tile_path, t.tissue_label, t.tissue_prob)
+    line = "%d,%d,%d,%4.2f,%d,%d,%d,%d,%d,%d,%d,%d,%0.4f,%s\n" % (
+      t.tile_num, t.r, t.c, t.tissue_percentage, t.c_s, t.r_s, t.c_e, t.r_e, t.o_c_s, t.o_r_s, t.o_c_e, t.o_r_e, t.score, t.tile_path)
     csv += line
 
   data_path = get_tile_annotation_path(tile_summary.slide_num, dimension)
@@ -1425,7 +1341,8 @@ def score_tiles(slide_num, np_img, dimension, annotation_tile=ANNOTATE_TILE):
 
   if annotation_tile:
     # import models and annotate labels
-    model = load_model(MODEL_DIR + MODEL_NAME + '.hdf5', compile=False)
+    model = torch.load(MODEL_DIR + MODEL_NAME + '.pt')
+    model.eval()
 
   count = 0
   high = 0
@@ -1434,12 +1351,6 @@ def score_tiles(slide_num, np_img, dimension, annotation_tile=ANNOTATE_TILE):
   none = 0
   export = 0
   noexport = 0
-  IR = 0
-  MT = 0
-  PG = 0
-  SP = 0
-  ST = 0
-  ND = 0
 
   tile_indices = get_tile_indices(h, w, row_tile_size, col_tile_size)
 
@@ -1477,33 +1388,22 @@ def score_tiles(slide_num, np_img, dimension, annotation_tile=ANNOTATE_TILE):
                    "-r%d-c%d-x%d-y%d-wh%d-e%d"%(r, c, o_c_s, o_r_s, o_c_e - o_c_s,math.floor((o_r_e - o_r_s) / EXPORT_TILE_SCALE)) + "." + DEST_TILE_EXT)
       pil_scaled_tile = tile_to_pil_tile(slide_num, o_c_s, o_c_e, o_r_s, o_r_e)
       if annotation_tile:
-        image = pil_to_np_rgb(pil_scaled_tile).astype("float32")/255
-        image = image[None, ...]
-        pred = model.predict(image, batch_size =1, verbose=0)
-        tissue_label = classes[np.argmax(pred[0])]
-        pred_prob = np.max(pred)
-        tissue_prob = '{:.4f}'.format(pred_prob)
-        print("Slide #" + padded_sl_num + " Annotate tile #" + padded_count_num + " label: " + str(tissue_label) + " probability: " + str(tissue_prob))
-        if tissue_label == "IR":
-          IR += 1
-        elif tissue_label == "MT":
-          MT += 1
-        elif tissue_label == "PG":
-          PG += 1
-        elif tissue_label == "SP":
-          SP += 1
-        elif tissue_label == "ST":
-          ST += 1
+        image = pil_scaled_tile.resize((500, 500))
+        image = np.array(image)
+        img = image[None, ...]
+        with torch.no_grad():
+          pred = model(torch.from_numpy(img).type(torch.FloatTensor)/255)
+        pred_img = pred['out'].cpu().detach().numpy()[0, ...]
+        pil_pred_tile = Image.fromarray(np.uint8(pred_img))
+        print("Slide #" + padded_sl_num + " Annotate tile #" + padded_count_num)
     else:
       pil_scaled_tile = None
       tile_path = ""
       if annotation_tile:
-        tissue_label = ""
-        tissue_prob = ""
-        ND += 1
+        pil_pred_tile = None
 
     tile = Tile(tile_sum, slide_num, pil_scaled_tile, count, r, c, r_s, r_e, c_s, c_e, o_r_s, o_r_e, o_c_s,
-                o_c_e, t_p, score, tile_path, tissue_label, tissue_prob)
+                o_c_e, t_p, score, tile_path, pil_pred_tile)
     tile_sum.tiles.append(tile)
 
   tile_sum.count = count
@@ -1513,15 +1413,6 @@ def score_tiles(slide_num, np_img, dimension, annotation_tile=ANNOTATE_TILE):
   tile_sum.none = none
   tile_sum.export = export
   tile_sum.noexport = noexport
-  summary = {'IR': IR, 'MT': MT, 'PG': PG, 'SP': SP}
-  tile_sum.IR = IR
-  tile_sum.MT = MT
-  tile_sum.PG = PG
-  tile_sum.SP = SP
-  tile_sum.ST = ST
-  tile_sum.ND = ND
-  tile_sum.tumor = IR+MT+PG+SP
-  tile_sum.diagnosis = max(summary.items(), key=lambda x: x[1])[0]
   tiles_by_score = tile_sum.tiles_by_score()
   rank = 0
   for t in tiles_by_score:
@@ -1595,7 +1486,7 @@ def summary_and_tiles_annotation(slide_num, display, save_summary=SAVE_SUMMARY, 
     if not os.path.exists(TILE_ANNOTATION_SUMMARY_DIR):
       os.makedirs(TILE_ANNOTATION_SUMMARY_DIR)
     generate_tile_summaries(tile_sum, np_img, fileterd_np_img, display=display, save_summary=save_summary)
-    generate_tile_annotation_summaries(tile_sum, np_img, fileterd_np_img, display=display, save_summary=save_summary)
+    generate_tile_annotation_summaries(tile_sum, np_img, display=display, save_summary=save_summary)
   if save_tiles:
     for tile in tile_sum.export_tiles():
       tile.save_tile()
@@ -1934,7 +1825,7 @@ class Tile:
   Class for information about a tile.
   """
   def __init__(self, tile_summary, slide_num, pil_scaled_tile, tile_num, r, c, r_s, r_e, c_s, c_e, o_r_s, o_r_e, o_c_s,
-               o_c_e, t_p, score, tile_path, tissue_label, tissue_prob):
+               o_c_e, t_p, score, tile_path, pil_pred_tile):
     self.tile_summary = tile_summary
     self.slide_num = slide_num
     self.pil_scaled_tile = pil_scaled_tile
@@ -1952,9 +1843,7 @@ class Tile:
     self.tissue_percentage = t_p
     self.score = score
     self.tile_path = tile_path
-    self.tissue_label = tissue_label
-    self.tissue_prob = tissue_prob
-
+    self.pil_pred_tile = pil_pred_tile
 
   def __str__(self):
     return "[Tile #%d, Row #%d, Column #%d, Tissue %4.2f%%, Score %0.4f]" % (
@@ -2087,10 +1976,7 @@ def image_row_annotation(slide_num, tile_summary, data_link):
     else:
       html += "        <div style=\"white-space: nowrap;\">S%03d Tile Summary</div>\n" % slide_num
 
-    html += "        <div style=\"font-size: smaller; white-space: nowrap;\">\n" + \
-            "          %s\n" % summary_annotation_stats(tile_summary).replace("\n", "<br/>\n          ") + \
-            "        </div>\n" + \
-            "      </td>\n"
+    html += "      </td>\n"
     html += "    </tr>\n"
     return html
 
@@ -2172,23 +2058,98 @@ def report_slide_annotation(slide_nums, tile_summaries_dict):
   csv_file.write(csv)
   csv_file.close()
 
+class DeepLabHead(nn.Sequential):
+  def __init__(self, in_channels, num_classes):
+    super(DeepLabHead, self).__init__(
+      ASPP(in_channels, [12, 24, 36]),
+      nn.Conv2d(256, 256, 3, padding=1, bias=False),
+      nn.BatchNorm2d(256),
+      nn.ReLU(),
+      nn.Conv2d(256, num_classes, 1),
+      nn.Tanh()
+      )
+
+class ASPPConv(nn.Sequential):
+  def __init__(self, in_channels, out_channels, dilation):
+    modules = [
+      nn.Conv2d(in_channels, out_channels, 3, padding=dilation, dilation=dilation, bias=False),
+      nn.BatchNorm2d(out_channels),
+      nn.ReLU()
+    ]
+    super(ASPPConv, self).__init__(*modules)
+
+
+class ASPPPooling(nn.Sequential):
+  def __init__(self, in_channels, out_channels):
+    super(ASPPPooling, self).__init__(
+      nn.AdaptiveAvgPool2d(1),
+      nn.Conv2d(in_channels, out_channels, 1, bias=False),
+      nn.BatchNorm2d(out_channels),
+      nn.ReLU())
+
+  def forward(self, x):
+    size = x.shape[-2:]
+    x = super(ASPPPooling, self).forward(x)
+    return F.interpolate(x, size=size, mode='bilinear', align_corners=False)
+
+
+class ASPP(nn.Module):
+  def __init__(self, in_channels, atrous_rates):
+    super(ASPP, self).__init__()
+    out_channels = 256
+    modules = []
+    modules.append(nn.Sequential(
+      nn.Conv2d(in_channels, out_channels, 1, bias=False),
+      nn.BatchNorm2d(out_channels),
+      nn.ReLU()))
+
+    rate1, rate2, rate3 = tuple(atrous_rates)
+    modules.append(ASPPConv(in_channels, out_channels, rate1))
+    modules.append(ASPPConv(in_channels, out_channels, rate2))
+    modules.append(ASPPConv(in_channels, out_channels, rate3))
+    modules.append(ASPPPooling(in_channels, out_channels))
+
+    self.convs = nn.ModuleList(modules)
+
+    self.project = nn.Sequential(
+      nn.Conv2d(5 * out_channels, out_channels, 1, bias=False),
+      nn.BatchNorm2d(out_channels),
+      nn.ReLU(),
+      nn.Dropout(0.5))
+
+  def forward(self, x):
+    res = []
+    for conv in self.convs:
+      res.append(conv(x))
+    res = torch.cat(res, dim=1)
+    return self.project(res)
+
+
+def createDeepLabv3(outputchannels=1):
+  model = models.segmentation.deeplabv3_resnet101(pretrained=True, progress=True)
+  # Added a Sigmoid activation after the last convolution layer
+  model.classifier = DeepLabHead(2048, outputchannels)
+  # Set the model in training mode
+  model.train()
+  return model
+
 
 ## 実行コード
 if __name__ == '__main__':
   # multiprocessing.freeze_support()  # windows上での実行の場合のみON
-  multiprocess_filter_and_annotation()
+  # multiprocess_filter_and_annotation()
 
   ## 途中の番号より実行する場合
-# start_ind = 1    #開始番号
-# singleprocess_filter_and_annotation(start_ind)
+  start_ind = 1    #開始番号
+  singleprocess_filter_and_annotation(start_ind)
 
   ## 複数のPREFIXのファイルを実行する場合
-# TRAIN_PREFIX = "DIF_"
-# singleprocess_filter_and_annotation(start_ind)
-# TRAIN_PREFIX = "MES_"
-# singleprocess_filter_and_annotation(start_ind)
-# TRAIN_PREFIX = "PRO_"
-# singleprocess_filter_and_annotation(start_ind)
-# TRAIN_PREFIX = "MIX_"
-# singleprocess_filter_and_annotation(start_ind)
+  # TRAIN_PREFIX = "DIF_"
+  # singleprocess_filter_and_annotation(start_ind)
+  # TRAIN_PREFIX = "MES_"
+  # singleprocess_filter_and_annotation(start_ind)
+  # TRAIN_PREFIX = "PRO_"
+  # singleprocess_filter_and_annotation(start_ind)
+  # TRAIN_PREFIX = "MIX_"
+  # singleprocess_filter_and_annotation(start_ind)
 

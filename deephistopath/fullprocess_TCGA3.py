@@ -2173,7 +2173,7 @@ def report_slide_annotation(slide_nums, tile_summaries_dict):
   csv = "Slide_Num, Estimated_diagnosis, Tumor/export_tiles, IR, MT, PG, SP\n"
   for slide_num in slide_nums:
     tile_summary = tile_summaries_dict[slide_num]
-    line = "%d, %s, %5.2f, %5.4f, %5.4f, %5.4f, %5.4f\n"%(slide_num,tile_summary.diagnosis,
+    line = "%d,%s,%5.2f,%5.4f,%5.4f,%5.4f,%5.4f\n"%(slide_num,tile_summary.diagnosis,
                                                           tile_summary.tumor/tile_summary.export,
                                                           tile_summary.IR/tile_summary.tumor,
                                                           tile_summary.MT/tile_summary.tumor,
@@ -2196,12 +2196,12 @@ if __name__ == '__main__':
   singleprocess_filter_and_annotation(start_ind)
 
   ## 複数のPREFIXのファイルを実行する場合
-  TRAIN_PREFIX = "DIF_"
-  singleprocess_filter_and_annotation(start_ind)
-# TRAIN_PREFIX = "MES_"
-# singleprocess_filter_and_annotation(start_ind)
-# TRAIN_PREFIX = "PRO_"
-# singleprocess_filter_and_annotation(start_ind)
-# TRAIN_PREFIX = "MIX_"
-# singleprocess_filter_and_annotation(start_ind)
+  # TRAIN_PREFIX = "DIF_"
+  # singleprocess_filter_and_annotation(start_ind)
+  # TRAIN_PREFIX = "MES_"
+  # singleprocess_filter_and_annotation(start_ind)
+  # TRAIN_PREFIX = "PRO_"
+  # singleprocess_filter_and_annotation(start_ind)
+  # TRAIN_PREFIX = "MIX_"
+  # singleprocess_filter_and_annotation(start_ind)
 
