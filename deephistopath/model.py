@@ -470,9 +470,9 @@ def main():
     ## Loss: categorical crossentropy
     ## Optimizer: Adam (lr = 0.0001, epsilon = 1e-4)
     ## save weights with the best,val_loss, reduce LR on plateu
-    ResNet50_model(X_train, X_valid, y_train, y_valid, X_test, y_test)
+    # ResNet50_model(X_train, X_valid, y_train, y_valid, X_test, y_test)
     # VGG19_model(X_train, X_valid, y_train, y_valid, X_test, y_test)
-    # InceptionV3_model(X_train, X_valid, y_train, y_valid, X_test, y_test)
+    InceptionV3_model(X_train, X_valid, y_train, y_valid, X_test, y_test)
     # Xception_model(X_train, X_valid, y_train, y_valid, X_test, y_test)
     # InceptionResNetV2_model(X_train, X_valid, y_train, y_valid, X_test, y_test)
     # NASNetLarge_model(X_train, X_valid, y_train, y_valid, X_test, y_test)

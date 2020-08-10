@@ -46,7 +46,7 @@ from keras.applications.resnet50 import ResNet50
 # FILTER処理を行う画像の縮小倍率 (例 2 → 縦1/2, 横 1/2で書き出し)
 SCALE_FACTOR = 32
 # 分割する際の1枚あたりのタイルサイズ
-ROW_TILE_SIZE = 1536
+ROW_TILE_SIZE = 153
 COL_TILE_SIZE = 1536
 # タイル分割時の組織量に基づく表示閾値
 TISSUE_HIGH_THRESH = 50

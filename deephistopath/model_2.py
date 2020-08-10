@@ -133,7 +133,7 @@ def img2array(path, z, classes, num_classes):
             image = Image.open(io.BytesIO(z.read(imgfile)))
             # 変換
             image = np.array(image)
-            _, data = normalizeStaining(image)
+            data,_ = normalizeStaining(image)
             # 画像から配列に変換
             X.append(data)
             y.append(classes.index(class_name))
