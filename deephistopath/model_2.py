@@ -19,16 +19,17 @@ from keras.applications.inception_resnet_v2 import InceptionResNetV2
 from keras.applications import NASNetLarge
 
 # Parameters
-DATASET_DIR = "/Users/aueda/Python/GitHub/HGSOC.zip"  # path to Zip file
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DATASET_DIR = BASE_DIR + "HGSOC_0810.zip"  # path to Zip file
 VALIDATION_SIZE = 0.18      # Train : validation : test = 0.70 : 0.15 : 0.15 (Train dirより validation 抽出)
 BATCH_SIZE = 16             # Batch size
 NUM_EPOCH = 25              # Number of epochs
 LEARNING_RATE = 1E-4        # learning rate
-BASE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 
 # HE image normalization parameters
 normalize_Io = 240
-normalize_alpha = 0.1
+normalize_alpha = 1
 normalize_beta = 0.15
 
 # Data Generator
@@ -442,9 +443,9 @@ def main():
     ## save weights with the best,val_loss, reduce LR on plateu
     ResNet50_model(X_train, X_valid, y_train, y_valid, X_test, y_test)
     # VGG19_model(X_train, X_valid, y_train, y_valid, X_test, y_test)
-    # InceptionV3_model(X_train, X_valid, y_train, y_valid, X_test, y_test)
+    InceptionV3_model(X_train, X_valid, y_train, y_valid, X_test, y_test)
     # Xception_model(X_train, X_valid, y_train, y_valid, X_test, y_test)
-    # InceptionResNetV2_model(X_train, X_valid, y_train, y_valid, X_test, y_test)
+    InceptionResNetV2_model(X_train, X_valid, y_train, y_valid, X_test, y_test)
     # NASNetLarge_model(X_train, X_valid, y_train, y_valid, X_test, y_test)
 
 if __name__ == "__main__":
