@@ -20,7 +20,7 @@ from keras.applications import NASNetLarge
 
 # Parameters
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DATASET_DIR = BASE_DIR + "HGSOC_0810.zip"  # path to Zip file
+DATASET_DIR = BASE_DIR + "/HGSOC_0810.zip"  # path to Zip file
 VALIDATION_SIZE = 0.18      # Train : validation : test = 0.70 : 0.15 : 0.15 (Train dirより validation 抽出)
 BATCH_SIZE = 16             # Batch size
 NUM_EPOCH = 25              # Number of epochs

@@ -1336,6 +1336,7 @@ def score_tiles(slide_num, np_img, dimension):
 
   # import models and annotate labels
   model = torch.load(MODEL_DIR + MODEL_NAME + '.pt')
+  model.cuda()
   model.eval()
 
   count = 0
@@ -1384,7 +1385,7 @@ def score_tiles(slide_num, np_img, dimension):
       image = np.array(pil_scaled_tile)
       img = normalizeStaining(image).transpose(2,0,1).reshape(1,3,500,500)
       with torch.no_grad():
-        pred = model(torch.from_numpy(img).type(torch.FloatTensor)/255)
+        pred = model(torch.from_numpy(img).type(torch.cuda.FloatTensor)/255)
         pred_img = pred['out'].cpu().detach().numpy()[0, ...].transpose(1,2,0)
         pil_pred_tile = Image.fromarray(np.uint8(pred_img))
         pil_pred_tile = pil_pred_tile.resize(((c_e - c_s), (r_e - r_s)))
@@ -2028,7 +2029,6 @@ def generate_tiled_annotation_html_result(slide_nums, tile_summaries_dict, data_
       text_file.write(html)
       text_file.close()
 
-
 class DeepLabHead(nn.Sequential):
   def __init__(self, in_channels, num_classes):
     super(DeepLabHead, self).__init__(
@@ -2039,6 +2039,7 @@ class DeepLabHead(nn.Sequential):
       nn.Conv2d(256, num_classes, 1),
       nn.Tanh()
       )
+
 
 class ASPPConv(nn.Sequential):
   def __init__(self, in_channels, out_channels, dilation):
@@ -2096,8 +2097,11 @@ class ASPP(nn.Module):
     return self.project(res)
 
 
-def createDeepLabv3(outputchannels=1):
+def createDeepLabv3(outputchannels=3):
   model = models.segmentation.deeplabv3_resnet101(pretrained=True, progress=True)
+  # if freeze parameter, check out below
+  # for param in model.parameters():
+  #   param.requires_grad = False
   # Added a Sigmoid activation after the last convolution layer
   model.classifier = DeepLabHead(2048, outputchannels)
   # Set the model in training mode

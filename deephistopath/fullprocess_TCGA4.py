@@ -43,7 +43,7 @@ from keras.applications.resnet50 import ResNet50
 # from keras.applications import NASNetLarge
 
 ## 画像処理設定項目：
-# FILTER処理を行う画像の縮小倍率 (例 2 → 縦1/2, 横 1/2で書き出し)
+# FILTER処理を行う画像の縮小倍率 (例 32 → 縦1/32, 横 1/32で処理)
 SCALE_FACTOR = 32
 # 分割する際の1枚あたりのタイルサイズ
 ROW_TILE_SIZE = 1024
